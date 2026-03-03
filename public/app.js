@@ -1,8 +1,6 @@
 const enableBtn = document.getElementById("enableBtn");
-const sendBtn = document.getElementById("sendBtn");
 const statusEl = document.getElementById("status");
 const DEVICE_ID_KEY = "hello_webpush_device_id";
-const ADMIN_TOKEN_KEY = "hello_webpush_admin_token";
 
 function setStatus(message) {
   statusEl.textContent = message;
@@ -14,16 +12,6 @@ function getOrCreateDeviceId() {
   const value = `${Date.now()}-${crypto.randomUUID()}`;
   localStorage.setItem(DEVICE_ID_KEY, value);
   return value;
-}
-
-function getAdminToken() {
-  let token = localStorage.getItem(ADMIN_TOKEN_KEY);
-  if (!token) {
-    token = window.prompt("Enter ADMIN_TOKEN for /sendHello:");
-    if (!token) return "";
-    localStorage.setItem(ADMIN_TOKEN_KEY, token);
-  }
-  return token;
 }
 
 async function registerServiceWorker() {
@@ -84,43 +72,10 @@ async function enableNotifications() {
   setStatus(`Subscribed. deviceId=${deviceId}`);
 }
 
-async function sendHello() {
-  const token = getAdminToken();
-  if (!token) {
-    throw new Error("Missing admin token.");
-  }
-  const resp = await fetch("/sendHello", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      "X-Admin-Token": token,
-    },
-    body: JSON.stringify({}),
-  });
-  const payload = await resp.json().catch(() => ({}));
-  if (!resp.ok) {
-    if (resp.status === 401) {
-      localStorage.removeItem(ADMIN_TOKEN_KEY);
-    }
-    throw new Error(payload.error || `sendHello failed (${resp.status}).`);
-  }
-  setStatus(`Push result: sent=${payload.sent} failed=${payload.failed} removed=${payload.removed}`);
-}
-
 enableBtn.addEventListener("click", async () => {
   setStatus("Enabling notifications...");
   try {
     await enableNotifications();
-  } catch (err) {
-    setStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
-  }
-});
-
-sendBtn.addEventListener("click", async () => {
-  setStatus("Sending hello push...");
-  try {
-    await sendHello();
   } catch (err) {
     setStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
   }

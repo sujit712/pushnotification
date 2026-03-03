@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"crypto/subtle"
 	"crypto/x509"
 	"database/sql"
 	"encoding/base64"
@@ -78,6 +79,15 @@ type sendNotificationRequest struct {
 	Title string `json:"title"`
 	Body  string `json:"body"`
 	URL   string `json:"url"`
+}
+
+type adminSubscription struct {
+	DeviceID     string               `json:"deviceId"`
+	Subscription webpush.Subscription `json:"subscription"`
+}
+
+type adminUpdateSubscriptionRequest struct {
+	Subscription browserPushSubscription `json:"subscription"`
 }
 
 type deviceSendResult struct {
@@ -345,6 +355,10 @@ func main() {
 	mux.HandleFunc("POST /sendHello", a.handleSendHello)
 	mux.HandleFunc("POST /sendNotification", a.handleSendNotification)
 	mux.HandleFunc("GET /debug/subscriptions", a.handleDebugSubscriptions)
+	mux.HandleFunc("GET /admin/subscriptions", a.handleAdminSubscriptionsPage)
+	mux.HandleFunc("GET /admin/api/subscriptions", a.handleAdminSubscriptionCollection)
+	mux.HandleFunc("POST /admin/api/sendHello", a.handleAdminSendHello)
+	mux.HandleFunc("/admin/api/subscriptions/", a.handleAdminSubscriptionItem)
 	mux.HandleFunc("/sw.js", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			methodNotAllowed(w)
@@ -662,6 +676,137 @@ func (a *app) handleDebugSubscriptions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+func (a *app) handleAdminSubscriptionsPage(w http.ResponseWriter, r *http.Request) {
+	if !a.hasValidBasicAuth(r) {
+		writeBasicAuthChallenge(w)
+		return
+	}
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	http.ServeFile(w, r, filepath.Join("public", "admin_subscriptions.html"))
+}
+
+func (a *app) handleAdminSubscriptionCollection(w http.ResponseWriter, r *http.Request) {
+	if !a.hasValidBasicAuth(r) {
+		writeBasicAuthChallenge(w)
+		return
+	}
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+
+	subs, err := a.store.List(r.Context())
+	if err != nil {
+		log.Printf("list subscriptions failed for admin endpoint: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "failed to load subscriptions")
+		return
+	}
+
+	items := make([]adminSubscription, 0, len(subs))
+	for _, s := range subs {
+		items = append(items, adminSubscription{
+			DeviceID:     s.DeviceID,
+			Subscription: s.Subscription,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"count": len(items),
+		"items": items,
+	})
+}
+
+func (a *app) handleAdminSubscriptionItem(w http.ResponseWriter, r *http.Request) {
+	if !a.hasValidBasicAuth(r) {
+		writeBasicAuthChallenge(w)
+		return
+	}
+
+	deviceID, ok := adminDeviceIDFromPath(r.URL.Path)
+	if !ok {
+		writeJSONError(w, http.StatusBadRequest, "invalid deviceId path")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodDelete:
+		if err := a.store.Delete(r.Context(), deviceID); err != nil {
+			log.Printf("admin delete failed for device %q: %v", deviceID, err)
+			writeJSONError(w, http.StatusInternalServerError, "failed to delete subscription")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted", "deviceId": deviceID})
+	case http.MethodPut:
+		var req adminUpdateSubscriptionRequest
+		if err := decodeJSONBody(r, &req); err != nil {
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if strings.TrimSpace(req.Subscription.Endpoint) == "" {
+			writeJSONError(w, http.StatusBadRequest, "subscription.endpoint is required")
+			return
+		}
+		if strings.TrimSpace(req.Subscription.Keys.P256dh) == "" || strings.TrimSpace(req.Subscription.Keys.Auth) == "" {
+			writeJSONError(w, http.StatusBadRequest, "subscription.keys.p256dh and subscription.keys.auth are required")
+			return
+		}
+		sub := webpush.Subscription{
+			Endpoint: req.Subscription.Endpoint,
+			Keys: webpush.Keys{
+				P256dh: req.Subscription.Keys.P256dh,
+				Auth:   req.Subscription.Keys.Auth,
+			},
+		}
+		if err := a.store.Upsert(r.Context(), deviceID, sub); err != nil {
+			log.Printf("admin update failed for device %q: %v", deviceID, err)
+			writeJSONError(w, http.StatusInternalServerError, "failed to update subscription")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "updated", "deviceId": deviceID})
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+func (a *app) handleAdminSendHello(w http.ResponseWriter, r *http.Request) {
+	if !a.hasValidBasicAuth(r) {
+		writeBasicAuthChallenge(w)
+		return
+	}
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+
+	var body struct{}
+	if err := decodeJSONBody(r, &body); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	subs, err := a.store.List(r.Context())
+	if err != nil {
+		log.Printf("list subscriptions failed: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "failed to load subscriptions")
+		return
+	}
+	if len(subs) == 0 {
+		writeJSON(w, http.StatusOK, sendHelloResponse{Sent: 0, Failed: 0, Removed: 0})
+		return
+	}
+
+	payload, _ := json.Marshal(pushPayload{
+		Title: notificationTitle,
+		Body:  notificationBody,
+		URL:   notificationURL,
+	})
+
+	result := a.sendPayload(r.Context(), subs, payload)
+	writeJSON(w, http.StatusOK, result)
+}
+
 func decodeJSONBody(r *http.Request, dst any) error {
 	if r.Body == nil {
 		return errors.New("request body is required")
@@ -705,6 +850,38 @@ func envOrDefault(key, fallback string) string {
 
 func (a *app) hasValidAdminToken(r *http.Request) bool {
 	return strings.TrimSpace(r.Header.Get("X-Admin-Token")) == a.cfg.AdminToken
+}
+
+func (a *app) hasValidBasicAuth(r *http.Request) bool {
+	username, password, ok := r.BasicAuth()
+	if !ok {
+		return false
+	}
+	usernameMatch := subtle.ConstantTimeCompare([]byte(username), []byte("sujit")) == 1
+	passwordMatch := subtle.ConstantTimeCompare([]byte(password), []byte(a.cfg.AdminToken)) == 1
+	return usernameMatch && passwordMatch
+}
+
+func writeBasicAuthChallenge(w http.ResponseWriter) {
+	w.Header().Set("WWW-Authenticate", `Basic realm="subscription-admin", charset="UTF-8"`)
+	writeJSONError(w, http.StatusUnauthorized, "authentication required")
+}
+
+func adminDeviceIDFromPath(path string) (string, bool) {
+	const prefix = "/admin/api/subscriptions/"
+	if !strings.HasPrefix(path, prefix) {
+		return "", false
+	}
+	raw := strings.TrimPrefix(path, prefix)
+	raw = strings.TrimSpace(raw)
+	if raw == "" || strings.Contains(raw, "/") {
+		return "", false
+	}
+	deviceID, err := url.PathUnescape(raw)
+	if err != nil || strings.TrimSpace(deviceID) == "" {
+		return "", false
+	}
+	return deviceID, true
 }
 
 func endpointHost(endpoint string) string {
