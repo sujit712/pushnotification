@@ -8,6 +8,8 @@ Minimal Web Push PWA with a Go backend using `net/http` and `github.com/SherCloc
 - PWA frontend (`public/`) with:
   - `Enable Notifications`
   - `Send Hello World`
+- CLI command for dynamic push content:
+  - `pushnotify --title="..." --body="..." --url="www.google.com"`
 - Push subscription by stable `deviceId` (stored in browser `localStorage`).
 - Admin-protected send endpoint (`X-Admin-Token`).
 - Subscription storage modes:
@@ -21,6 +23,8 @@ Minimal Web Push PWA with a Go backend using `net/http` and `github.com/SherCloc
 ```text
 hello-webpush-pwa/
 ├── cmd/
+│   ├── pushnotify/
+│   │   └── main.go
 │   └── vapidpub/
 │       └── main.go
 ├── public/
