@@ -1,0 +1,20 @@
+# Build artifacts
+hello-webpush
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Local/state files
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+subscriptions.json
+
+# Env and secrets
+.env
+.env.*
+
+# Editor/OS
+.DS_Store
