@@ -7,7 +7,11 @@ Minimal Web Push PWA with a Go backend using `net/http` and `github.com/SherCloc
 - Same-origin API + static hosting from one server.
 - PWA frontend (`public/`) with:
   - `Enable Notifications`
-  - `Send Hello World`
+- Subscription admin UI (`/admin/subscriptions`) with Basic Auth:
+  - view subscriptions
+  - edit subscription
+  - delete subscription
+  - send `Hello World` push
 - CLI command for dynamic push content:
   - `pushnotify --title="..." --body="..." --url="www.google.com"`
 - Push subscription by stable `deviceId` (stored in browser `localStorage`).
@@ -28,10 +32,12 @@ hello-webpush-pwa/
 │   └── vapidpub/
 │       └── main.go
 ├── public/
+│   ├── admin_subscriptions.html
 │   ├── app.js
 │   ├── icon.svg
 │   ├── index.html
 │   ├── manifest.json
+│   ├── robots.txt
 │   └── sw.js
 ├── go.mod
 ├── main.go
@@ -164,6 +170,29 @@ Body:
 }
 ```
 
+### `GET /admin/subscriptions`
+
+Basic Auth protected admin page.
+
+- Username: `sujit`
+- Password: `ADMIN_TOKEN`
+
+### `GET /admin/api/subscriptions`
+
+Basic Auth protected subscription list endpoint.
+
+### `PUT /admin/api/subscriptions/{deviceId}`
+
+Basic Auth protected subscription update endpoint.
+
+### `DELETE /admin/api/subscriptions/{deviceId}`
+
+Basic Auth protected subscription delete endpoint.
+
+### `POST /admin/api/sendHello`
+
+Basic Auth protected endpoint to send the default `Hello World` payload.
+
 ## Curl example for `/sendHello`
 
 ```bash
@@ -196,6 +225,25 @@ Optional flags:
 - `--endpoint` (default: `https://pushnotification.newsorbit.tech/sendNotification`)
 - `--admin-token` can be omitted if `ADMIN_TOKEN` env var is set
 - `--url` supports relative paths (`/offers`) and full/bare domains (`https://example.com` or `www.example.com`)
+
+## Disable crawling for pushnotification subdomain
+
+Crawler controls included:
+
+- `public/robots.txt` disallows all user agents.
+- Public/admin HTML pages include `meta robots` with noindex/nofollow.
+
+Recommended reverse-proxy header:
+
+```caddyfile
+pushnotification.newsorbit.tech {
+  header {
+    X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
+  }
+  encode gzip
+  reverse_proxy 127.0.0.1:3000
+}
+```
 
 ## Deploy on VPS with systemd
 

@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#0a7cff" />
+    <meta name="robots" content="noindex, nofollow, noarchive, nosnippet" />
     <link rel="manifest" href="/manifest.json" />
     <title>Hello Web Push PWA</title>
     <style>
@@ -69,15 +70,14 @@
     <main>
       <h1>Hello Web Push PWA</h1>
       <p>
-        1) Tap <strong>Enable Notifications</strong> on each device/browser profile.<br />
-        2) Tap <strong>Send Hello World</strong> to broadcast a test push.
+        Tap <strong>Enable Notifications</strong> on each device/browser profile.
       </p>
+      <p>Send actions are available in the protected admin subscriptions page.</p>
       <p>
         iPhone note: must be opened as installed PWA (Add to Home Screen) over HTTPS.
       </p>
       <div class="actions">
         <button id="enableBtn">Enable Notifications</button>
-        <button id="sendBtn" class="secondary">Send Hello World</button>
       </div>
       <div id="status" aria-live="polite">Ready.</div>
     </main>

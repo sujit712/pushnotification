@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow, noarchive, nosnippet" />
+    <title>Subscription Admin</title>
+    <style>
+      :root {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color-scheme: light;
+      }
+      body {
+        margin: 0;
+        background: #f3f4f6;
+        color: #111827;
+      }
+      main {
+        width: min(1080px, 96vw);
+        margin: 24px auto;
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        padding: 16px;
+      }
+      h1 { margin-top: 0; }
+      .toolbar {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+      button {
+        border: 0;
+        border-radius: 8px;
+        padding: 8px 12px;
+        cursor: pointer;
+        background: #0a7cff;
+        color: #fff;
+      }
+      button.secondary { background: #111827; }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+      }
+      th, td {
+        border-bottom: 1px solid #e5e7eb;
+        padding: 8px;
+        vertical-align: top;
+        text-align: left;
+      }
+      code {
+        font-size: 12px;
+        word-break: break-all;
+      }
+      #status {
+        margin: 10px 0;
+        padding: 8px;
+        border-radius: 8px;
+        background: #eef2ff;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Subscription Admin</h1>
+      <p>Protected with Basic Auth. Username: <code>sujit</code>, password: <code>ADMIN_TOKEN</code>.</p>
+      <div class="toolbar">
+        <button id="sendHelloBtn">Send Hello World</button>
+        <button id="refreshBtn">Refresh</button>
+      </div>
+      <div id="status">Loading...</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Device ID</th>
+            <th>Endpoint</th>
+            <th>P256DH</th>
+            <th>Auth</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </main>
+
+    <script>
+      const rowsEl = document.getElementById("rows");
+      const statusEl = document.getElementById("status");
+      const refreshBtn = document.getElementById("refreshBtn");
+      const sendHelloBtn = document.getElementById("sendHelloBtn");
+
+      function setStatus(msg) {
+        statusEl.textContent = msg;
+      }
+
+      function escapeHtml(v) {
+        return String(v)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
+
+      async function fetchSubscriptions() {
+        const res = await fetch("/admin/api/subscriptions", {
+          headers: { Accept: "application/json" },
+          credentials: "same-origin",
+        });
+        if (!res.ok) {
+          const body = await res.text();
+          throw new Error(`Load failed (${res.status}): ${body}`);
+        }
+        return res.json();
+      }
+
+      function renderRows(items) {
+        rowsEl.innerHTML = "";
+        for (const item of items) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td><code>${escapeHtml(item.deviceId)}</code></td>
+            <td><code>${escapeHtml(item.subscription.endpoint)}</code></td>
+            <td><code>${escapeHtml(item.subscription.keys.p256dh)}</code></td>
+            <td><code>${escapeHtml(item.subscription.keys.auth)}</code></td>
+            <td>
+              <button data-action="edit" data-id="${escapeHtml(item.deviceId)}">Edit</button>
+              <button class="secondary" data-action="delete" data-id="${escapeHtml(item.deviceId)}">Delete</button>
+            </td>
+          `;
+          rowsEl.appendChild(tr);
+        }
+      }
+
+      async function reload() {
+        setStatus("Loading subscriptions...");
+        try {
+          const data = await fetchSubscriptions();
+          renderRows(data.items || []);
+          setStatus(`Loaded ${data.count || 0} subscriptions.`);
+        } catch (err) {
+          setStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      async function sendHelloWorld() {
+        setStatus("Sending Hello World push...");
+        const res = await fetch("/admin/api/sendHello", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          credentials: "same-origin",
+          body: JSON.stringify({}),
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(payload.error || `Send failed (${res.status})`);
+        }
+        setStatus(`Push result: sent=${payload.sent} failed=${payload.failed} removed=${payload.removed}`);
+      }
+
+      async function deleteSubscription(deviceId) {
+        if (!confirm(`Delete subscription for deviceId: ${deviceId}?`)) return;
+        setStatus(`Deleting ${deviceId}...`);
+        const res = await fetch(`/admin/api/subscriptions/${encodeURIComponent(deviceId)}`, {
+          method: "DELETE",
+          headers: { Accept: "application/json" },
+          credentials: "same-origin",
+        });
+        const body = await res.text();
+        if (!res.ok) throw new Error(`Delete failed (${res.status}): ${body}`);
+        setStatus(`Deleted ${deviceId}.`);
+        await reload();
+      }
+
+      async function editSubscription(deviceId) {
+        const endpoint = prompt("New endpoint URL:");
+        if (endpoint === null) return;
+        const p256dh = prompt("New keys.p256dh:");
+        if (p256dh === null) return;
+        const auth = prompt("New keys.auth:");
+        if (auth === null) return;
+
+        setStatus(`Updating ${deviceId}...`);
+        const res = await fetch(`/admin/api/subscriptions/${encodeURIComponent(deviceId)}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          credentials: "same-origin",
+          body: JSON.stringify({
+            subscription: {
+              endpoint: endpoint.trim(),
+              keys: { p256dh: p256dh.trim(), auth: auth.trim() },
+            },
+          }),
+        });
+        const body = await res.text();
+        if (!res.ok) throw new Error(`Update failed (${res.status}): ${body}`);
+        setStatus(`Updated ${deviceId}.`);
+        await reload();
+      }
+
+      rowsEl.addEventListener("click", async (e) => {
+        const target = e.target;
+        if (!(target instanceof HTMLButtonElement)) return;
+        const action = target.dataset.action;
+        const deviceId = target.dataset.id;
+        if (!action || !deviceId) return;
+
+        try {
+          if (action === "delete") await deleteSubscription(deviceId);
+          if (action === "edit") await editSubscription(deviceId);
+        } catch (err) {
+          setStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      });
+
+      refreshBtn.addEventListener("click", reload);
+      sendHelloBtn.addEventListener("click", async () => {
+        try {
+          await sendHelloWorld();
+        } catch (err) {
+          setStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      });
+      reload();
+    </script>
+  </body>
+</html>
