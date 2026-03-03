@@ -25,7 +25,7 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const targetUrl = (event.notification.data && event.notification.data.url) || "/";
+  const targetUrl = normalizeTargetUrl((event.notification.data && event.notification.data.url) || "/");
 
   event.waitUntil(
     clients.matchAll({ type: "window", includeUncontrolled: true }).then((windowClients) => {
@@ -43,3 +43,12 @@ self.addEventListener("notificationclick", (event) => {
     })
   );
 });
+
+function normalizeTargetUrl(rawValue) {
+  const value = String(rawValue || "").trim();
+  if (!value) return "/";
+  if (/^https?:\/\//i.test(value)) return value;
+  if (/^\/\//.test(value)) return `https:${value}`;
+  if (/^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}(\/.*)?$/i.test(value)) return `https://${value}`;
+  return value;
+}

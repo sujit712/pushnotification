@@ -143,6 +143,23 @@ Sends this payload to all subscriptions:
 
 TTL is set to `60` seconds.
 
+### `POST /sendNotification`
+
+Headers:
+
+- `Content-Type: application/json`
+- `X-Admin-Token: <ADMIN_TOKEN>`
+
+Body:
+
+```json
+{
+  "title": "New push dynamic title",
+  "body": "New dynamic body",
+  "url": "/new-dynamic-url"
+}
+```
+
 ## Curl example for `/sendHello`
 
 ```bash
@@ -151,6 +168,30 @@ curl -i -X POST 'https://your-domain.example/sendHello' \
   -H 'X-Admin-Token: change-me' \
   -d '{}'
 ```
+
+## CLI command for dynamic push content
+
+Build once:
+
+```bash
+go build -o pushnotify ./cmd/pushnotify
+```
+
+Run:
+
+```bash
+./pushnotify \
+  --title="New push dynamic title" \
+  --body="New dynamic body" \
+  --url="www.google.com" \
+  --admin-token="change-me"
+```
+
+Optional flags:
+
+- `--endpoint` (default: `https://pushnotification.newsorbit.tech/sendNotification`)
+- `--admin-token` can be omitted if `ADMIN_TOKEN` env var is set
+- `--url` supports relative paths (`/offers`) and full/bare domains (`https://example.com` or `www.example.com`)
 
 ## Deploy on VPS with systemd
 

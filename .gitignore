@@ -1,5 +1,6 @@
 # Build artifacts
-hello-webpush
+/hello-webpush
+/pushnotify
 *.exe
 *.dll
 *.so

@@ -74,6 +74,12 @@ type sendHelloResponse struct {
 	Removed int `json:"removed"`
 }
 
+type sendNotificationRequest struct {
+	Title string `json:"title"`
+	Body  string `json:"body"`
+	URL   string `json:"url"`
+}
+
 type deviceSendResult struct {
 	DeviceID     string `json:"deviceId"`
 	EndpointHost string `json:"endpointHost"`
@@ -337,6 +343,7 @@ func main() {
 	mux.HandleFunc("GET /vapidPublicKey", a.handleVAPIDPublicKey)
 	mux.HandleFunc("POST /subscribe", a.handleSubscribe)
 	mux.HandleFunc("POST /sendHello", a.handleSendHello)
+	mux.HandleFunc("POST /sendNotification", a.handleSendNotification)
 	mux.HandleFunc("GET /debug/subscriptions", a.handleDebugSubscriptions)
 	mux.HandleFunc("/sw.js", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -504,6 +511,56 @@ func (a *app) handleSendHello(w http.ResponseWriter, r *http.Request) {
 		URL:   notificationURL,
 	})
 
+	result := a.sendPayload(r.Context(), subs, payload)
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (a *app) handleSendNotification(w http.ResponseWriter, r *http.Request) {
+	if !a.hasValidAdminToken(r) {
+		writeJSONError(w, http.StatusUnauthorized, "invalid admin token")
+		return
+	}
+
+	var req sendNotificationRequest
+	if err := decodeJSONBody(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if strings.TrimSpace(req.Title) == "" {
+		writeJSONError(w, http.StatusBadRequest, "title is required")
+		return
+	}
+	if strings.TrimSpace(req.Body) == "" {
+		writeJSONError(w, http.StatusBadRequest, "body is required")
+		return
+	}
+	if strings.TrimSpace(req.URL) == "" {
+		req.URL = "/"
+	}
+	req.URL = normalizeNotificationURL(req.URL)
+
+	subs, err := a.store.List(r.Context())
+	if err != nil {
+		log.Printf("list subscriptions failed: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "failed to load subscriptions")
+		return
+	}
+	if len(subs) == 0 {
+		writeJSON(w, http.StatusOK, sendHelloResponse{Sent: 0, Failed: 0, Removed: 0})
+		return
+	}
+
+	payload, _ := json.Marshal(pushPayload{
+		Title: req.Title,
+		Body:  req.Body,
+		URL:   req.URL,
+	})
+
+	result := a.sendPayload(r.Context(), subs, payload)
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (a *app) sendPayload(ctx context.Context, subs []storedSubscription, payload []byte) sendHelloResponse {
 	result := sendHelloResponse{}
 	details := make([]deviceSendResult, 0, len(subs))
 	for _, item := range subs {
@@ -538,7 +595,7 @@ func (a *app) handleSendHello(w http.ResponseWriter, r *http.Request) {
 		if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {
 			result.Removed++
 			detail.Removed = true
-			if err := a.store.Delete(r.Context(), item.DeviceID); err != nil {
+			if err := a.store.Delete(ctx, item.DeviceID); err != nil {
 				log.Printf("failed removing invalid subscription %q: %v", item.DeviceID, err)
 			}
 			details = append(details, detail)
@@ -549,7 +606,7 @@ func (a *app) handleSendHello(w http.ResponseWriter, r *http.Request) {
 			strings.Contains(detail.Response, "BadJwtToken") {
 			result.Removed++
 			detail.Removed = true
-			if err := a.store.Delete(r.Context(), item.DeviceID); err != nil {
+			if err := a.store.Delete(ctx, item.DeviceID); err != nil {
 				log.Printf("failed removing apple BadJwtToken subscription %q: %v", item.DeviceID, err)
 			}
 			details = append(details, detail)
@@ -568,7 +625,7 @@ func (a *app) handleSendHello(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.setLastSendResult(details)
-	writeJSON(w, http.StatusOK, result)
+	return result
 }
 
 func (a *app) handleDebugSubscriptions(w http.ResponseWriter, r *http.Request) {
@@ -663,6 +720,34 @@ func shortenEndpoint(endpoint string) string {
 		return endpoint
 	}
 	return endpoint[:96] + "..."
+}
+
+func normalizeNotificationURL(raw string) string {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return "/"
+	}
+	lower := strings.ToLower(value)
+	if strings.HasPrefix(lower, "javascript:") {
+		return "/"
+	}
+	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+		return value
+	}
+	if strings.HasPrefix(value, "//") {
+		return "https:" + value
+	}
+	if strings.HasPrefix(value, "/") {
+		return value
+	}
+
+	// Bare host/path values like "www.google.com" become absolute HTTPS URLs.
+	candidate := "https://" + value
+	u, err := url.Parse(candidate)
+	if err == nil && strings.Contains(u.Host, ".") {
+		return candidate
+	}
+	return "/" + strings.TrimLeft(value, "/")
 }
 
 func (a *app) setLastSendResult(results []deviceSendResult) {
